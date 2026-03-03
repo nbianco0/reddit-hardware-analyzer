@@ -24,7 +24,6 @@ def export_data():
 
     with open(csv_file, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        # 🔑 NEW: Added Description to the headers
         writer.writerow(["World Name", "Category", "Author", "Active Players", "Favorites", "Tags"])
         writer.writerows(rows)
 
