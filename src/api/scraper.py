@@ -1,6 +1,7 @@
 import sqlite3
 import time
 import hashlib
+import os
 from datetime import datetime
 from vrc_auth import VRChatClient  
 from vrchatapi.api import worlds_api
@@ -22,20 +23,21 @@ def generate_checksum(world):
     return hashlib.sha256(payload.encode('utf-8')).hexdigest()
 
 def throttle_request(delay_seconds=10.0):
-    """Ensures a polite, steady gap between API calls."""
+    # Ensures a polite gap between API calls
     global last_api_call
     delta = time.time() - last_api_call
     if delta < delay_seconds:
         sleep_time = delay_seconds - delta
-        # Print a temporary message to know it's waiting
+        # Print temp msg to know when waiting
         print(f"⏳ Throttling: Waiting {sleep_time:.1f} seconds to respect API...", end="\r", flush=True)
         time.sleep(sleep_time)
-        # Clear the line once the wait is over
         print(" " * 60, end="\r", flush=True)
     last_api_call = time.time()
 
 class WorldEngineDB:
-    def __init__(self, db_name="vrc_engine.db"):
+    def __init__(self, db_name="data/vrc_engine.db"):
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(db_name), exist_ok=True)
         self.conn = sqlite3.connect(db_name)
         self.conn.execute("PRAGMA busy_timeout = 10000") 
         self.cursor = self.conn.cursor()
@@ -152,7 +154,7 @@ def safe_search_worlds(w_api, **kwargs):
             else:
                 raise e
 
-def run_scraper():
+def run_scraper(drip_mode=False):
     print("Authenticating...")
     client = VRChatClient()
     client.authenticate()
@@ -160,12 +162,16 @@ def run_scraper():
     db = WorldEngineDB()
 
     seen_worlds = set()
+    
+    # Adjust pages based on drip_mode
+    max_pulse_pages = 1 if drip_mode else 15
+    max_fav_pages = 1 if drip_mode else 10
+    max_new_pages = 1 if drip_mode else 10
 
     try:
         # TIER 1: Live Pulse (Heat)
         print("\n--- [TIER 1] Scraping 'Heat' (Live Pulse) ---")
         page = 0
-        max_pulse_pages = 5 
         zero_streak = 0  
         
         while page < max_pulse_pages:
@@ -203,12 +209,11 @@ def run_scraper():
             page += 1
 
         if page == max_pulse_pages:
-            print("\n⚠️ Reached maximum safety cap of 100 pages. Stopping Live Pulse.")
+            print(f"\n⚠️ Reached safety cap of {max_pulse_pages} pages. Stopping Live Pulse.")
 
         # TIER 2: Legacy Worlds (Favorites)
         print("\n--- [TIER 2] Scraping 'Favorites' (Legacy Vault) ---")
-        pages_to_scrape = 5  
-        for page in range(pages_to_scrape):
+        for page in range(max_fav_pages):
             offset_value = page * 50
             print(f"Fetching Favorite worlds {offset_value + 1} to {offset_value + 50}...".ljust(80), end="\r")
             
@@ -223,10 +228,9 @@ def run_scraper():
 
         # TIER 3: The Newcomer Worlds (Emerging)
         print("\n\n--- [TIER 3] Scraping 'Created' (Newcomer Watchlist) ---")
-        pages_to_scrape = 5  
         saved_count = 0
         
-        for page in range(pages_to_scrape):
+        for page in range(max_new_pages):
             offset_value = page * 50
             print(f"Fetching Newest worlds {offset_value + 1} to {offset_value + 50}...".ljust(80), end="\r")
             
@@ -242,9 +246,9 @@ def run_scraper():
                     seen_worlds.add(w.id)
                     saved_count += 1
                     
-        print(f"\nFiltered out low worlds. Saved {saved_count} highly-rated newcomer worlds.")
+        print(f"\nFiltered out indexed worlds. Saved {saved_count} worlds.")
 
-        print(f"\n✔ Fast Batch Scrape complete! Processed {len(seen_worlds)} unique worlds.")
+        print(f"\n✔ Fast Batch Scrape complete! Processed {len(seen_worlds)} worlds.")
     
     except Exception as e:
         print(f"\n❌ Fatal error during pipeline execution: {e}")
